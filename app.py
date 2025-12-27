@@ -10,7 +10,6 @@ from plotly.subplots import make_subplots
 # -------------------------------------------
 st.set_page_config(page_title="Market Eagle 🦅", layout="wide", page_icon="🦅")
 
-# CSSで見た目を整形
 st.markdown("""
 <style>
     html, body, [class*="css"] {
@@ -182,18 +181,17 @@ def get_data(ticker, period):
         return None
 
 # -------------------------------------------
-# 5. モダンチャート描画 (★修正箇所)
+# 5. モダンチャート描画
 # -------------------------------------------
 def plot_modern_chart(df, ticker):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.03, row_heights=[0.8, 0.2],
                         subplot_titles=("", ""))
 
-    # 1. ローソク足
-    # 【重要】ここが修正箇所です。showinglegend -> showlegend に直しました。
+    # 1. ローソク足 (修正箇所: showlegend=False)
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name='Price', showlegend=False 
+        name='Price', showlegend=False
     ), row=1, col=1)
 
     # 2. BB Cloud
@@ -227,71 +225,4 @@ def plot_modern_chart(df, ticker):
     ), row=1, col=1)
     fig.add_trace(go.Scatter(
         x=df.index, y=df['Sell'], mode='markers',
-        marker=dict(symbol='triangle-down', color='#008FFB', size=12, line=dict(width=1, color='white')),
-        name='SELL'
-    ), row=1, col=1)
-
-    # 6. ADX
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['ADX'], line=dict(color='#775DD0', width=2), name='ADX'
-    ), row=2, col=1)
-    fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=adx_threshold, y1=adx_threshold,
-                  line=dict(color="#FFAA00", width=1, dash="dash"), row=2, col=1)
-
-    fig.update_layout(
-        height=600,
-        margin=dict(l=10, r=10, t=10, b=10),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        xaxis_rangeslider_visible=False,
-        hovermode='x unified',
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
-
-    return fig
-
-# -------------------------------------------
-# 6. メインコンテンツ
-# -------------------------------------------
-st.title(f"📊 Analysis: {selected_label.split('|')[0]}")
-
-with st.spinner('Fetching data...'):
-    df = get_data(current_ticker, chart_period)
-
-if df is not None:
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    change = last['Close'] - prev['Close']
-    pct_change = (change / prev['Close']) * 100
-    
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        st.metric("株価", f"{last['Close']:,.2f}", f"{pct_change:+.2f}%")
-    
-    with c2:
-        trend_status = "HOLD (保有中)" if last['Trend'] == 1 else "WAIT (様子見)"
-        color = "#00E396" if last['Trend'] == 1 else "#FEB019"
-        st.markdown(f"""
-        <div style="background-color:{color}; padding:10px; border-radius:5px; text-align:center; color:white; font-weight:bold;">
-            {trend_status}
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        if last['Trend'] == 1:
-            st.metric("決済ライン (逆指値)", f"{last['StopLine']:,.2f}", delta_color="inverse")
-        else:
-            dist_to_bb = last['BB_Upper'] - last['Close']
-            st.metric("ブレイクまであと", f"{dist_to_bb:+.2f}")
-
-    st.plotly_chart(plot_modern_chart(df, current_ticker), use_container_width=True)
-
-    with st.expander("📄 詳細データを見る"):
-        st.dataframe(df[['Close', 'BB_Upper', 'ADX', 'Trend', 'StopLine']].tail(10).style.format("{:.2f}"))
-
-else:
-    st.error("データが見つかりませんでした。銘柄コードを確認してください。")
+        marker=dict(symbol='triangle-down', color='#0
