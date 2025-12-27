@@ -4,135 +4,146 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from datetime import datetime
 
 # -------------------------------------------
-# 1. モダンUI設定 & CSSデザイン注入
+# 1. アプリ設定 & CSSデザイン
 # -------------------------------------------
-st.set_page_config(page_title="Market Eagle 🦅", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Market Eagle Pro", layout="wide", page_icon="🦅")
 
 st.markdown("""
 <style>
+    /* 全体フォント */
     html, body, [class*="css"] {
         font-family: 'Helvetica Neue', 'Hiragino Sans', sans-serif;
     }
+    /* メトリックカード */
     div[data-testid="metric-container"] {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        padding: 10px;
         border-left: 5px solid #ff4b4b;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        box-shadow: 1px 1px 3px rgba(0,0,0,0.1);
     }
-    div.stButton > button {
-        border-radius: 20px;
-        font-weight: bold;
+    /* ギャラリーモードのカード */
+    .stock-card {
+        background-color: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    /* バッジ */
+    .badge-buy {
+        background-color: #ff4b4b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em;
+    }
+    .badge-hold {
+        background-color: #00e396; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em;
+    }
+    .badge-wait {
+        background-color: #e0e0e0; color: #555; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------------------------------
-# 2. 予測変換用の銘柄辞書
+# 2. 銘柄辞書 & 設定
 # -------------------------------------------
 TICKER_DICT = {
-    # --- 米国株 ---
-    "NVDA | NVIDIA": "NVDA",
-    "AAPL | Apple": "AAPL",
-    "MSFT | Microsoft": "MSFT",
-    "TSLA | Tesla": "TSLA",
-    "AMZN | Amazon": "AMZN",
-    "GOOGL | Google": "GOOGL",
-    "META | Meta": "META",
-    "AMD | AMD": "AMD",
-    "PLTR | Palantir": "PLTR",
-    "COIN | Coinbase": "COIN",
-    # --- 日本株 ---
-    "7203.T | トヨタ自動車": "7203.T",
-    "9984.T | ソフトバンクG": "9984.T",
-    "8035.T | 東京エレクトロン": "8035.T",
-    "6146.T | ディスコ": "6146.T",
-    "6920.T | レーザーテック": "6920.T",
-    "6758.T | ソニーG": "6758.T",
-    "8306.T | 三菱UFJ": "8306.T",
-    "9983.T | ファーストリテイリング": "9983.T",
-    "7974.T | 任天堂": "7974.T",
-    "7011.T | 三菱重工": "7011.T",
-    # --- 暗号資産 ---
-    "BTC-USD | Bitcoin": "BTC-USD",
-    "ETH-USD | Ethereum": "ETH-USD",
-    "SOL-USD | Solana": "SOL-USD",
-    "XRP-USD | XRP": "XRP-USD",
+    "NVDA | NVIDIA": "NVDA", "AAPL | Apple": "AAPL", "MSFT | Microsoft": "MSFT",
+    "TSLA | Tesla": "TSLA", "AMZN | Amazon": "AMZN", "GOOGL | Google": "GOOGL",
+    "META | Meta": "META", "AMD | AMD": "AMD", "PLTR | Palantir": "PLTR",
+    "7203.T | トヨタ": "7203.T", "9984.T | SBG": "9984.T", "8035.T | 東エレ": "8035.T",
+    "6146.T | ディスコ": "6146.T", "6920.T | レーザー": "6920.T", "6758.T | ソニー": "6758.T",
+    "BTC-USD | Bitcoin": "BTC-USD", "ETH-USD | Ethereum": "ETH-USD"
 }
 
 # -------------------------------------------
-# 3. サイドバー設定
+# 3. サイドバー
 # -------------------------------------------
 with st.sidebar:
-    st.title("🦅 Market Eagle")
-    st.caption("AI Hybrid Strategy: BB+ADX x ATR")
+    st.title("🦅 Market Eagle Pro")
+    
+    # モード切替
+    app_mode = st.radio("表示モード", ["🔍 個別詳細分析", "🖼️ チャート一覧 (ギャラリー)"])
     
     st.divider()
-    
-    st.subheader("🔍 銘柄検索")
-    selected_label = st.selectbox(
-        "銘柄を選択または入力",
-        options=list(TICKER_DICT.keys()),
-        index=0
-    )
-    current_ticker = TICKER_DICT.get(selected_label, selected_label)
 
-    st.subheader("📅 チャート期間")
-    chart_period = st.select_slider(
-        "表示期間",
-        options=["3mo", "6mo", "1y", "2y", "5y"],
-        value="1y"
-    )
+    # 個別分析用
+    if app_mode == "🔍 個別詳細分析":
+        st.subheader("銘柄選択")
+        selected_label = st.selectbox("銘柄", list(TICKER_DICT.keys()), index=0)
+        current_ticker = TICKER_DICT.get(selected_label, selected_label)
+        
+        st.subheader("期間設定")
+        chart_period = st.select_slider("期間", options=["3mo", "6mo", "1y", "2y", "5y"], value="1y")
 
+    # ギャラリー用
+    else:
+        st.subheader("リスト設定")
+        preset_list = st.selectbox("監視リスト", ["米国ハイテク", "日本株", "暗号資産", "カスタム"])
+        
+        if preset_list == "米国ハイテク":
+            default_tickers = "NVDA, AAPL, MSFT, TSLA, AMZN, GOOGL, META, AMD"
+        elif preset_list == "日本株":
+            default_tickers = "7203.T, 9984.T, 8035.T, 6146.T, 6920.T, 6758.T"
+        elif preset_list == "暗号資産":
+            default_tickers = "BTC-USD, ETH-USD, SOL-USD"
+        else:
+            default_tickers = "NVDA, 7203.T"
+            
+        ticker_input = st.text_area("コード (カンマ区切り)", default_tickers)
+        gallery_tickers = [t.strip() for t in ticker_input.split(',')]
+        
+        gallery_period = st.select_slider("一覧の期間", options=["6mo", "1y"], value="1y")
+
+    # ロジック設定 (共通)
     with st.expander("⚙️ ロジック詳細設定"):
         bb_period = st.number_input("BB期間", value=20)
-        adx_threshold = st.number_input("ADX基準値", value=25)
-        atr_period = st.number_input("ATR期間", value=22)
-        atr_multiplier = st.number_input("ATR倍率", value=3.5)
+        adx_th = st.number_input("ADX基準", value=25)
+        atr_p = st.number_input("ATR期間", value=22)
+        atr_m = st.number_input("ATR倍率", value=3.5)
 
 # -------------------------------------------
-# 4. データ処理関数
+# 4. 計算エンジン
 # -------------------------------------------
 @st.cache_data(ttl=3600)
-def get_data(ticker, period):
+def get_analyzed_data(ticker, period):
     try:
         df = yf.download(ticker, period=period, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        
-        if df.empty or len(df) < 20: return None
-        
+        if df.empty or len(df) < 30: return None
+
         # BB
-        df['SMA'] = df['Close'].rolling(window=bb_period).mean()
-        df['STD'] = df['Close'].rolling(window=bb_period).std()
+        df['SMA'] = df['Close'].rolling(bb_period).mean()
+        df['STD'] = df['Close'].rolling(bb_period).std()
         df['BB_Upper'] = df['SMA'] + (2.0 * df['STD'])
         df['BB_Lower'] = df['SMA'] - (2.0 * df['STD'])
 
         # ADX
         adx_len = 14
-        df['H-L'] = df['High'] - df['Low']
-        df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
-        df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
-        df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+        df['TR'] = np.maximum((df['High'] - df['Low']), 
+                   np.maximum(abs(df['High'] - df['Close'].shift(1)), 
+                              abs(df['Low'] - df['Close'].shift(1))))
+        df['+DM'] = np.where((df['High']-df['High'].shift(1)) > (df['Low'].shift(1)-df['Low']), 
+                             np.maximum(df['High']-df['High'].shift(1), 0), 0)
+        df['-DM'] = np.where((df['Low'].shift(1)-df['Low']) > (df['High']-df['High'].shift(1)), 
+                             np.maximum(df['Low'].shift(1)-df['Low'], 0), 0)
         
-        df['UpMove'] = df['High'] - df['High'].shift(1)
-        df['DownMove'] = df['Low'].shift(1) - df['Low']
-        df['+DM'] = np.where((df['UpMove'] > df['DownMove']) & (df['UpMove'] > 0), df['UpMove'], 0)
-        df['-DM'] = np.where((df['DownMove'] > df['UpMove']) & (df['DownMove'] > 0), df['DownMove'], 0)
-        
-        # 簡易ADX計算
-        df['+DI'] = 100 * (df['+DM'].rolling(adx_len).mean() / df['TR'].rolling(adx_len).mean())
-        df['-DI'] = 100 * (df['-DM'].rolling(adx_len).mean() / df['TR'].rolling(adx_len).mean())
-        df['DX'] = 100 * abs(df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI'])
+        # Smooth
+        df['TR_s'] = df['TR'].rolling(adx_len).mean()
+        df['+DM_s'] = df['+DM'].rolling(adx_len).mean()
+        df['-DM_s'] = df['-DM'].rolling(adx_len).mean()
+        df['DX'] = 100 * abs((df['+DM_s']/df['TR_s']) - (df['-DM_s']/df['TR_s'])) / \
+                   ((df['+DM_s']/df['TR_s']) + (df['-DM_s']/df['TR_s']))
         df['ADX'] = df['DX'].rolling(adx_len).mean()
 
         # ATR Exit
-        df['ATR'] = df['TR'].rolling(atr_period).mean()
-        df['High_Roll'] = df['High'].rolling(atr_period).max()
+        df['ATR'] = df['TR'].rolling(atr_p).mean()
+        df['High_Roll'] = df['High'].rolling(atr_p).max()
 
-        # シグナル判定
+        # Logic Loop
         trend = np.zeros(len(df))
         stop_line = np.zeros(len(df))
         buy_sig = [np.nan] * len(df)
@@ -140,157 +151,202 @@ def get_data(ticker, period):
         
         curr_trend = -1
         curr_stop = 0.0
-        
-        first_idx = max(bb_period, adx_len, atr_period)
-        
+        first_idx = max(bb_period, adx_len, atr_p)
+
         for i in range(first_idx, len(df)):
             close = df['Close'].iloc[i]
-            high_roll = df['High_Roll'].iloc[i]
-            atr = df['ATR'].iloc[i]
-            adx = df['ADX'].iloc[i]
-            bb_upper = df['BB_Upper'].iloc[i]
+            long_stop = df['High_Roll'].iloc[i] - (df['ATR'].iloc[i] * atr_m)
             
-            long_stop = high_roll - (atr * atr_multiplier)
-            
-            if curr_trend == 1: # 保有中
+            if curr_trend == 1: # Hold
                 curr_stop = max(long_stop, curr_stop)
                 if close < curr_stop:
-                    curr_trend = -1 # 決済
+                    curr_trend = -1
                     sell_sig[i] = close
                 else:
-                    stop_line[i] = curr_stop
                     trend[i] = 1
-            else: # 待機中
+                    stop_line[i] = curr_stop
+            else: # Wait
                 curr_stop = long_stop
-                if (close > bb_upper) and (adx > adx_threshold):
+                if (close > df['BB_Upper'].iloc[i]) and (df['ADX'].iloc[i] > adx_th):
                     curr_trend = 1
                     buy_sig[i] = close
-                    stop_line[i] = long_stop
                     trend[i] = 1
+                    stop_line[i] = long_stop
                 else:
                     stop_line[i] = long_stop
 
-        df['StopLine'] = stop_line
         df['Trend'] = trend
+        df['StopLine'] = stop_line
         df['Buy'] = buy_sig
         df['Sell'] = sell_sig
         
         return df
-
-    except Exception:
+    except:
         return None
 
 # -------------------------------------------
-# 5. モダンチャート描画 (エラー回避版)
+# 5. チャート描画関数 (ハイライト強化版)
 # -------------------------------------------
-def plot_modern_chart(df, ticker):
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                        vertical_spacing=0.03, row_heights=[0.8, 0.2],
-                        subplot_titles=("", ""))
+def plot_enhanced_chart(df, ticker, minimal=False):
+    # レイアウト: ミニマルモードならADXなし
+    rows = 1 if minimal else 2
+    row_heights = [1.0] if minimal else [0.8, 0.2]
+    
+    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.03, row_heights=row_heights)
 
     # 1. ローソク足
-    # ★ ここが修正箇所です。nameのみ指定し、余計なパラメータは削除しました。
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name='Price'
+        name='Price', showlegend=not minimal
     ), row=1, col=1)
 
-    # 2. BB Cloud
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['BB_Upper'], line=dict(width=0), showlegend=False, hoverinfo='skip'
-    ), row=1, col=1)
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['BB_Lower'], fill='tonexty', fillcolor='rgba(0, 100, 255, 0.05)',
-        line=dict(width=0), showlegend=False, name='BB Cloud', hoverinfo='skip'
-    ), row=1, col=1)
+    # 2. BB Cloud & Highlight
+    if not minimal:
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], fill=None, line=dict(width=0), showlegend=False), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], fill='tonexty', fillcolor='rgba(0,100,255,0.05)', 
+                                 line=dict(width=0), showlegend=False), row=1, col=1)
+        
+        # ハイライト
+        hi_adx = df[df['ADX'] > adx_th]
+        fig.add_trace(go.Scatter(x=hi_adx.index, y=hi_adx['BB_Upper'], mode='markers', 
+                                 marker=dict(color='#FFAA00', size=2), name='Energy Zone'), row=1, col=1)
 
-    # 3. BB Highlight
-    high_adx = df[df['ADX'] > adx_threshold]
-    fig.add_trace(go.Scatter(
-        x=high_adx.index, y=high_adx['BB_Upper'], mode='markers',
-        marker=dict(size=3, color='#FFAA00'), name='High Energy Zone'
-    ), row=1, col=1)
-
-    # 4. ATR Stop
+    # 3. ATR Stop (保有ライン)
     holding = df[df['Trend'] == 1]
     fig.add_trace(go.Scatter(
         x=holding.index, y=holding['StopLine'], mode='markers',
-        marker=dict(size=4, color='#00E396'), name='ATR Stop'
+        marker=dict(color='#00E396', size=3 if minimal else 5), name='Hold Line', showlegend=not minimal
     ), row=1, col=1)
 
-    # 5. Signals
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['Buy'], mode='markers',
-        marker=dict(symbol='triangle-up', color='#FF4560', size=12, line=dict(width=1, color='white')),
-        name='BUY'
-    ), row=1, col=1)
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['Sell'], mode='markers',
-        marker=dict(symbol='triangle-down', color='#008FFB', size=12, line=dict(width=1, color='white')),
-        name='SELL'
-    ), row=1, col=1)
+    # 4. ★ シグナル強調 (巨大化 & 垂直ライン)
+    buys = df.dropna(subset=['Buy'])
+    sells = df.dropna(subset=['Sell'])
 
-    # 6. ADX
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['ADX'], line=dict(color='#775DD0', width=2), name='ADX'
-    ), row=2, col=1)
-    fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=adx_threshold, y1=adx_threshold,
-                  line=dict(color="#FFAA00", width=1, dash="dash"), row=2, col=1)
+    # BUYサイン
+    if not buys.empty:
+        fig.add_trace(go.Scatter(
+            x=buys.index, y=buys['Buy'], mode='markers',
+            marker=dict(symbol='triangle-up', color='#FF0000', size=20 if not minimal else 12, line=dict(width=2, color='white')),
+            name='BUY'
+        ), row=1, col=1)
+        # 垂直ライン (詳細モードのみ)
+        if not minimal:
+            for d in buys.index:
+                fig.add_vline(x=d, line_width=1, line_dash="dash", line_color="red", opacity=0.3)
 
+    # SELLサイン
+    if not sells.empty:
+        fig.add_trace(go.Scatter(
+            x=sells.index, y=sells['Sell'], mode='markers',
+            marker=dict(symbol='triangle-down', color='#0000FF', size=20 if not minimal else 12, line=dict(width=2, color='white')),
+            name='SELL'
+        ), row=1, col=1)
+
+    # 5. ADX (詳細モードのみ)
+    if not minimal:
+        fig.add_trace(go.Scatter(x=df.index, y=df['ADX'], line=dict(color='#775DD0', width=2), name='ADX'), row=2, col=1)
+        fig.add_hline(y=adx_th, line_dash="dash", line_color="orange", row=2, col=1)
+
+    # レイアウト調整
     fig.update_layout(
-        height=600,
+        height=300 if minimal else 600,
         margin=dict(l=10, r=10, t=10, b=10),
         plot_bgcolor='white',
-        paper_bgcolor='white',
         xaxis_rangeslider_visible=False,
-        hovermode='x unified',
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        showlegend=not minimal,
+        hovermode='x unified'
     )
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
+    fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
+    fig.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
 
     return fig
 
 # -------------------------------------------
-# 6. メインコンテンツ
+# 6. メイン表示ロジック
 # -------------------------------------------
-st.title(f"📊 Analysis: {selected_label.split('|')[0]}")
 
-with st.spinner('Fetching data...'):
-    df = get_data(current_ticker, chart_period)
-
-if df is not None:
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    change = last['Close'] - prev['Close']
-    pct_change = (change / prev['Close']) * 100
+# === モードA: 個別詳細分析 ===
+if app_mode == "🔍 個別詳細分析":
+    st.title(f"🦅 {selected_label.split('|')[0]} 詳細分析")
     
-    c1, c2, c3 = st.columns(3)
+    with st.spinner('Calculating...'):
+        df = get_analyzed_data(current_ticker, chart_period)
     
-    with c1:
-        st.metric("株価", f"{last['Close']:,.2f}", f"{pct_change:+.2f}%")
-    
-    with c2:
-        trend_status = "HOLD (保有中)" if last['Trend'] == 1 else "WAIT (様子見)"
-        color = "#00E396" if last['Trend'] == 1 else "#FEB019"
-        st.markdown(f"""
-        <div style="background-color:{color}; padding:10px; border-radius:5px; text-align:center; color:white; font-weight:bold;">
-            {trend_status}
-        </div>
-        """, unsafe_allow_html=True)
+    if df is not None:
+        last = df.iloc[-1]
+        
+        # --- シグナル発生日時の特定 ---
+        # 最後に Buy または Sell が出た日を探す
+        last_buy_date = df['Buy'].last_valid_index()
+        days_since_buy = (df.index[-1] - last_buy_date).days if last_buy_date else None
+        
+        # 3カラム表示
+        c1, c2, c3 = st.columns(3)
+        
+        with c1:
+            # 株価表示
+            chg = last['Close'] - df.iloc[-2]['Close']
+            st.metric("現在株価", f"{last['Close']:,.2f}", f"{chg:+.2f}")
+            
+        with c2:
+            # シグナル状態
+            if last['Trend'] == 1:
+                st.markdown('<div class="badge-hold" style="text-align:center; padding:10px; font-size:20px;">🟢 HOLD (保有中)</div>', unsafe_allow_html=True)
+                st.metric("決済ライン (逆指値)", f"{last['StopLine']:,.2f}")
+            else:
+                st.markdown('<div class="badge-wait" style="text-align:center; padding:10px; font-size:20px;">⚪ WAIT (様子見)</div>', unsafe_allow_html=True)
+                
+        with c3:
+            # ★ 発生日の明記
+            if last_buy_date:
+                date_str = last_buy_date.strftime('%Y/%m/%d')
+                st.metric("直近のBUYサイン点灯", f"{date_str}", f"{days_since_buy}日前")
+            else:
+                st.metric("直近のBUYサイン", "なし (期間内)")
 
-    with c3:
-        if last['Trend'] == 1:
-            st.metric("決済ライン (逆指値)", f"{last['StopLine']:,.2f}", delta_color="inverse")
-        else:
-            dist_to_bb = last['BB_Upper'] - last['Close']
-            st.metric("ブレイクまであと", f"{dist_to_bb:+.2f}")
+        # チャート表示
+        st.plotly_chart(plot_enhanced_chart(df, current_ticker), use_container_width=True)
+        
+        with st.expander("データ詳細"):
+            st.dataframe(df.tail(10))
+    else:
+        st.error("データが取得できませんでした")
 
-    st.plotly_chart(plot_modern_chart(df, current_ticker), use_container_width=True)
-
-    with st.expander("📄 詳細データを見る"):
-        st.dataframe(df[['Close', 'BB_Upper', 'ADX', 'Trend', 'StopLine']].tail(10).style.format("{:.2f}"))
-
+# === モードB: チャート一覧 (ギャラリー) ===
 else:
-    st.error("データが見つかりませんでした。銘柄コードを確認してください。")
+    st.title("🖼️ チャート・ギャラリー (一覧)")
+    st.markdown("設定したリストのチャートを一括表示します。")
+    
+    if st.button("一覧を更新 🔄"):
+        cols = st.columns(2) # 2列で表示
+        
+        for i, ticker in enumerate(gallery_tickers):
+            with cols[i % 2]: # 列を交互に使う
+                df = get_analyzed_data(ticker, gallery_period)
+                
+                if df is not None:
+                    last = df.iloc[-1]
+                    # バッジ決定
+                    if last['Trend'] == 1:
+                        badge = '<span class="badge-hold">🟢 HOLD</span>'
+                    else:
+                        badge = '<span class="badge-wait">⚪ WAIT</span>'
+                    
+                    # 発生日
+                    last_buy = df['Buy'].last_valid_index()
+                    buy_info = f"BUY点灯: {last_buy.strftime('%m/%d')}" if last_buy else "BUYなし"
+                    
+                    # カード表示
+                    st.markdown(f"""
+                    <div class="stock-card">
+                        <h3>{ticker} {badge}</h3>
+                        <p style="font-size:1.2em; font-weight:bold;">${last['Close']:.2f}</p>
+                        <p style="color:gray;">{buy_info}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # ミニマルチャート
+                    st.plotly_chart(plot_enhanced_chart(df, ticker, minimal=True), use_container_width=True)
+                else:
+                    st.warning(f"{ticker}: 取得エラー")
