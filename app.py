@@ -182,17 +182,18 @@ def get_data(ticker, period):
         return None
 
 # -------------------------------------------
-# 5. モダンチャート描画
+# 5. モダンチャート描画 (★修正箇所)
 # -------------------------------------------
 def plot_modern_chart(df, ticker):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.03, row_heights=[0.8, 0.2],
                         subplot_titles=("", ""))
 
-    # 1. ローソク足 (ここを修正しました！)
+    # 1. ローソク足
+    # 【重要】ここが修正箇所です。showinglegend -> showlegend に直しました。
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name='Price', showlegend=False  # showinglegend -> showlegend に修正
+        name='Price', showlegend=False 
     ), row=1, col=1)
 
     # 2. BB Cloud
