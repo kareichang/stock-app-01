@@ -191,7 +191,7 @@ def plot_modern_chart(df, ticker):
     # 1. ローソク足 (修正箇所: showlegend=False)
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name='Price', showinglegend=False
+        name='Price', showlegend=False
     ), row=1, col=1)
 
     # 2. BB Cloud
