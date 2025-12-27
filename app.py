@@ -2,48 +2,65 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # -------------------------------------------
 # 1. アプリ全体の設定
 # -------------------------------------------
-st.set_page_config(page_title="AI株価スクリーナー", layout="wide")
+st.set_page_config(page_title="AI株価分析Pro", layout="wide", page_icon="📈")
 
-st.title("🚀 チャンス発見スクリーナー")
-st.markdown("最強ロジック (Entry: **BB+ADX** / Exit: **ATR**) で全銘柄を一括診断します。")
+st.title("📈 AI株価分析Pro")
+st.markdown("""
+<style>
+div.stButton > button:first-child {
+    background-color: #FF4B4B;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    border-radius: 10px;
+    padding: 10px 24px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # サイドバー設定
-st.sidebar.header("⚙️ スクリーニング設定")
+st.sidebar.header("🔍 分析設定")
 
 # 監視リストのプリセット
 preset_list = st.sidebar.selectbox(
-    "監視リストを選択",
-    ("米国ハイテク (Mag7 + AI)", "日本株 (主力大型)", "暗号資産 (Major)")
+    "リスト選択",
+    ("米国ハイテク (Mag7)", "日本株 (主力)", "暗号資産", "カスタム")
 )
 
-if preset_list == "米国ハイテク (Mag7 + AI)":
-    default_tickers = "NVDA, AAPL, MSFT, AMZN, GOOGL, META, TSLA, AMD, AVGO, TSM"
-elif preset_list == "日本株 (主力大型)":
-    default_tickers = "7203.T, 9984.T, 8035.T, 6920.T, 6146.T, 6758.T, 8306.T, 9983.T, 6857.T, 6501.T"
+if preset_list == "米国ハイテク (Mag7)":
+    default_tickers = "NVDA, AAPL, MSFT, AMZN, GOOGL, META, TSLA, AMD, AVGO"
+elif preset_list == "日本株 (主力)":
+    default_tickers = "7203.T, 9984.T, 8035.T, 6920.T, 6146.T, 6758.T, 8306.T, 9983.T"
+elif preset_list == "暗号資産":
+    default_tickers = "BTC-USD, ETH-USD, SOL-USD, XRP-USD"
 else:
-    default_tickers = "BTC-USD, ETH-USD, SOL-USD, XRP-USD, DOGE-USD"
+    default_tickers = "NVDA"
 
-ticker_input = st.sidebar.text_area("銘柄コード (カンマ区切り)", default_tickers)
-tickers = [t.strip() for t in ticker_input.split(',')]
+ticker_input = st.sidebar.text_area("銘柄リスト (カンマ区切り)", default_tickers)
+tickers_list = [t.strip() for t in ticker_input.split(',')]
 
 # パラメータ設定
-st.sidebar.subheader("ロジック調整")
-bb_period = st.sidebar.number_input("BB期間", value=20)
-adx_threshold = st.sidebar.number_input("ADX基準値", value=25)
-atr_period = st.sidebar.number_input("ATR期間", value=22)
-atr_multiplier = st.sidebar.number_input("ATR倍率", value=3.5)
+with st.sidebar.expander("ロジック詳細設定", expanded=False):
+    bb_period = st.number_input("BB期間", value=20)
+    adx_threshold = st.number_input("ADX基準値", value=25)
+    atr_period = st.number_input("ATR期間", value=22)
+    atr_multiplier = st.number_input("ATR倍率", value=3.5)
+
+# 個別チャート用の銘柄選択
+selected_ticker = st.sidebar.selectbox("📊 チャートを表示する銘柄", tickers_list)
 
 # -------------------------------------------
-# 2. 計算エンジン (1銘柄ごとの診断)
+# 2. 計算＆データ処理関数
 # -------------------------------------------
-def analyze_stock(ticker):
+def get_stock_data(ticker, period="1y"):
     try:
-        # 期間は長めに取る（ADX計算のため）
-        df = yf.download(ticker, period="1y", progress=False)
+        df = yf.download(ticker, period=period, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
@@ -54,7 +71,8 @@ def analyze_stock(ticker):
         # BB
         df['SMA'] = df['Close'].rolling(window=bb_period).mean()
         df['STD'] = df['Close'].rolling(window=bb_period).std()
-        df['BB_Upper'] = df['SMA'] + (2.0 * df['STD']) # Entryは2σ固定でOK
+        df['BB_Upper'] = df['SMA'] + (2.0 * df['STD'])
+        df['BB_Lower'] = df['SMA'] - (2.0 * df['STD'])
 
         # ADX
         adx_len = 14
@@ -82,135 +100,184 @@ def analyze_stock(ticker):
         df['High_Roll'] = df['High'].rolling(window=atr_period).max()
 
         # シグナル判定ループ
-        trend = 0 # 1:Hold, -1:Wait
-        stop_line = 0.0
-        
-        # 高速化のため直近データのみで最終判定
-        # (本来は全期間ループが必要だが、現状の状態を知るため簡易シミュレーション)
-        # 正確を期すため、全期間回します
-        trends = []
-        stops = []
+        trend = np.zeros(len(df))
+        stop_line = np.zeros(len(df))
+        buy_sig = [np.nan] * len(df)
+        sell_sig = [np.nan] * len(df)
         
         curr_trend = -1
         curr_stop = 0.0
         
         first_idx = max(bb_period, adx_len, atr_period)
         
-        for i in range(len(df)):
-            if i < first_idx:
-                trends.append(0)
-                stops.append(0)
-                continue
-                
+        for i in range(first_idx, len(df)):
             close = df['Close'].iloc[i]
             high_roll = df['High_Roll'].iloc[i]
             atr = df['ATR'].iloc[i]
             adx = df['ADX'].iloc[i]
             bb_upper = df['BB_Upper'].iloc[i]
             
-            # ATR Stop calculation
             long_stop = high_roll - (atr * atr_multiplier)
             
             if curr_trend == 1: # 保有中
                 curr_stop = max(long_stop, curr_stop)
                 if close < curr_stop:
-                    curr_trend = -1 # 売り転換
-                # 維持
+                    curr_trend = -1 # 決済
+                    sell_sig[i] = close
+                else:
+                    stop_line[i] = curr_stop
+                    trend[i] = 1
             else: # 待機中
                 curr_stop = long_stop
-                # 買い条件: BBブレイク AND ADX > 基準値
                 if (close > bb_upper) and (adx > adx_threshold):
-                    curr_trend = 1 # 買い転換
-            
-            trends.append(curr_trend)
-            stops.append(curr_stop)
+                    curr_trend = 1 # エントリー
+                    buy_sig[i] = close
+                    stop_line[i] = long_stop
+                    trend[i] = 1
+                else:
+                    stop_line[i] = long_stop # 表示用に計算だけしておく
 
-        # 最新の状態を取得
-        last_close = df['Close'].iloc[-1]
-        last_trend = trends[-1]
-        prev_trend = trends[-2]
-        last_stop = stops[-1]
-        last_adx = df['ADX'].iloc[-1]
-
-        # ステータス決定
-        status = ""
-        color = ""
-        action = ""
+        df['StopLine'] = stop_line
+        df['Trend'] = trend
+        df['Buy'] = buy_sig
+        df['Sell'] = sell_sig
         
-        if last_trend == 1 and prev_trend == -1:
-            status = "🚀 BUY SIGNAL" # 今日点灯
-            color = "background-color: #ffcccc; color: red; font-weight: bold;" # 赤背景
-            action = "今すぐエントリー"
-        elif last_trend == 1:
-            status = "🟢 HOLD"
-            color = "background-color: #ccffcc; color: green;" # 緑背景
-            action = f"逆指値: {last_stop:.2f}"
-        else:
-            status = "⚪ WAIT"
-            color = ""
-            action = "様子見"
-            
-        return {
-            "銘柄": ticker,
-            "株価": last_close,
-            "シグナル": status,
-            "ADX (勢い)": f"{last_adx:.1f}",
-            "アクション": action,
-            "_raw_signal": 2 if "BUY" in status else (1 if "HOLD" in status else 0), # ソート用
-            "_style": color
-        }
+        return df
+
     except Exception as e:
         return None
 
 # -------------------------------------------
-# 3. メイン処理：一覧表示
+# 3. チャート描画関数 (TradingView風)
 # -------------------------------------------
-if st.button('全銘柄を一括スキャン開始 🔎'):
-    results = []
-    progress_bar = st.progress(0)
+def plot_beautiful_chart(df, ticker):
+    # レイアウト作成（上がローソク足、下がADX）
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.05, row_heights=[0.75, 0.25],
+                        subplot_titles=(f"{ticker} Hybrid Strategy Chart", "ADX Trend Strength"))
+
+    # --- 1. ローソク足 ---
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
+                                 low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
+
+    # --- 2. ボリンジャーバンド (クラウド & ハイライト) ---
+    # 下限バンド
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='rgba(128,128,128,0.5)', width=1),
+                             mode='lines', name='BB Lower', showlegend=False), row=1, col=1)
+    # 上限バンド (通常・グレー)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='rgba(128,128,128,0.5)', width=1),
+                             mode='lines', fill='tonexty', fillcolor='rgba(0, 153, 255, 0.1)', # 青い雲
+                             name='BB Cloud'), row=1, col=1)
+
+    # ★ ADX連動ハイライト (ADX > 基準値 の時だけ、上限バンドをオレンジに)
+    high_adx_mask = df['ADX'] > adx_threshold
+    bb_upper_highlight = df['BB_Upper'].copy()
+    bb_upper_highlight[~high_adx_mask] = None # 条件を満たさない場所を消す
     
-    for i, t in enumerate(tickers):
-        data = analyze_stock(t)
-        if data:
-            results.append(data)
-        progress_bar.progress((i + 1) / len(tickers))
+    fig.add_trace(go.Scatter(x=df.index, y=bb_upper_highlight, line=dict(color='#FFAA00', width=3),
+                             mode='lines', name='BB Strong (Entry Zone)'), row=1, col=1)
+
+    # --- 3. ATR命綱 (保有中のみ表示) ---
+    holding_mask = df['Trend'] == 1
+    stop_line_plot = df['StopLine'].copy()
+    stop_line_plot[~holding_mask] = None
     
-    progress_bar.empty()
+    fig.add_trace(go.Scatter(x=df.index, y=stop_line_plot, mode='markers',
+                             marker=dict(color='#00FF00', size=4), name='ATR Stop (Hold)'), row=1, col=1)
 
-    if results:
-        # データフレーム化
-        df_res = pd.DataFrame(results)
-        
-        # ソート: BUYシグナル(2) > HOLD(1) > WAIT(0) の順に並べる
-        df_res = df_res.sort_values(by='_raw_signal', ascending=False)
-        
-        # 表示用カラム整理
-        display_cols = ["銘柄", "株価", "シグナル", "ADX (勢い)", "アクション"]
-        
-        # スタイル適用関数
-        def style_rows(row):
-            return [row['_style']] * len(display_cols)
+    # --- 4. 売買サイン ---
+    fig.add_trace(go.Scatter(x=df.index, y=df['Buy'], mode='markers',
+                             marker=dict(symbol='triangle-up', color='#FF0000', size=15, line=dict(width=1, color='black')),
+                             name='BUY Signal'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['Sell'], mode='markers',
+                             marker=dict(symbol='triangle-down', color='#0000FF', size=15, line=dict(width=1, color='black')),
+                             name='EXIT Signal'), row=1, col=1)
 
-        # テーブル表示
-        st.subheader(f"📊 診断結果 ({len(results)}銘柄)")
-        st.write("一番上が最もチャンスのある銘柄です。")
-        
-        st_df = df_res[display_cols].style.apply(lambda x: df_res['_style'], axis=0, subset=display_cols)
-        # シンプルに表示（Streamlitのdataframe機能で色付けは制限があるため、簡易表示）
-        # 色付けを確実にするため、独自のHTML生成などはせず、Streamlit標準のdataframeで見やすくします
-        
-        # 簡易的な色付けロジック
-        def highlight_signal(val):
-            if "BUY" in val:
-                return 'background-color: #ff4b4b; color: white; font-weight: bold;'
-            elif "HOLD" in val:
-                return 'background-color: #d4edda; color: black;'
-            return ''
+    # --- 5. ADX (サブプロット) ---
+    fig.add_trace(go.Scatter(x=df.index, y=df['ADX'], line=dict(color='purple', width=2), name='ADX'), row=2, col=1)
+    # 基準線
+    fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=adx_threshold, y1=adx_threshold,
+                  line=dict(color="orange", width=1, dash="dash"), row=2, col=1)
+    
+    # スタイル調整
+    fig.update_layout(height=600, margin=dict(l=10, r=10, t=30, b=10),
+                      xaxis_rangeslider_visible=False,
+                      paper_bgcolor='rgba(0,0,0,0)', # 背景透明
+                      plot_bgcolor='rgba(240,240,240,0.5)',
+                      hovermode='x unified')
+    
+    # Y軸設定
+    fig.update_yaxes(title_text="Price", row=1, col=1)
+    fig.update_yaxes(title_text="ADX", row=2, col=1)
 
-        st.dataframe(
-            df_res[display_cols].style.map(highlight_signal, subset=['シグナル']),
-            use_container_width=True,
-            height=600
-        )
-    else:
-        st.warning("データが取得できませんでした。")
+    return fig
+
+# -------------------------------------------
+# 4. メイン表示切り替え (タブ)
+# -------------------------------------------
+tab1, tab2 = st.tabs(["📊 チャート詳細分析", "🚀 全銘柄スクリーナー"])
+
+# --- タブ1: 個別チャート ---
+with tab1:
+    st.subheader(f"{selected_ticker} の詳細分析")
+    with st.spinner('チャートを描画中...'):
+        df_chart = get_stock_data(selected_ticker)
+        
+        if df_chart is not None:
+            # 最新ステータス表示
+            last = df_chart.iloc[-1]
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("現在株価", f"{last['Close']:.2f}")
+            col2.metric("ADX (勢い)", f"{last['ADX']:.1f}", delta="強い" if last['ADX'] > adx_threshold else "弱い")
+            
+            if last['Trend'] == 1:
+                col3.success("🟢 保有中 (HOLD)")
+                col4.metric("決済ライン", f"{last['StopLine']:.2f}")
+            else:
+                col3.info("⚪ 様子見 (WAIT)")
+                col4.write("エントリー待ち")
+
+            # プロ級チャート表示
+            fig = plot_beautiful_chart(df_chart, selected_ticker)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error("データ取得エラー")
+
+# --- タブ2: スクリーナー ---
+with tab2:
+    if st.button('全銘柄を一括スキャン開始 🔎', key='scan_btn'):
+        results = []
+        bar = st.progress(0)
+        
+        for i, t in enumerate(tickers_list):
+            d = get_stock_data(t)
+            if d is not None:
+                last = d.iloc[-1]
+                prev = d.iloc[-2]
+                
+                status = "⚪ WAIT"
+                if last['Trend'] == 1 and prev['Trend'] == -1: status = "🚀 BUY NOW"
+                elif last['Trend'] == 1: status = "🟢 HOLD"
+                
+                results.append({
+                    "銘柄": t,
+                    "株価": last['Close'],
+                    "シグナル": status,
+                    "ADX": f"{last['ADX']:.1f}",
+                    "_sort": 2 if "BUY" in status else (1 if "HOLD" in status else 0)
+                })
+            bar.progress((i+1)/len(tickers_list))
+        
+        bar.empty()
+        
+        if results:
+            res_df = pd.DataFrame(results).sort_values(by='_sort', ascending=False).drop(columns=['_sort'])
+            
+            # 色付け関数
+            def color_signal(val):
+                color = 'white'
+                if 'BUY' in val: color = '#ffcccc'
+                elif 'HOLD' in val: color = '#ccffcc'
+                return f'background-color: {color}'
+
+            st.dataframe(res_df.style.map(color_signal, subset=['シグナル']), use_container_width=True, height=500)
